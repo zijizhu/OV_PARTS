@@ -123,8 +123,7 @@ def get_detection_dataset_dicts(
         names = [names]
     assert len(names), names
     dataset_dicts = [
-        wrap_metas(DatasetCatalog.get(dataset_name), dataset_name=dataset_name)
-        for dataset_name in names
+        DatasetCatalog.get(dataset_name) for dataset_name in names
     ]
     for dataset_name, dicts in zip(names, dataset_dicts):
         assert len(dicts), "Dataset '{}' is empty!".format(dataset_name)

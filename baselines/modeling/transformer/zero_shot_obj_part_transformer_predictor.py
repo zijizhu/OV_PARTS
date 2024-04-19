@@ -4,7 +4,7 @@ import torch
 from torch import nn
 import torch.nn.functional as F
 from detectron2.config import configurable
-from mmseg.ops import resize
+from mmseg.models.utils import resize
 from .transformer_predictor import TransformerPredictor, MLP
 from einops import rearrange, repeat
 

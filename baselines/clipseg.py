@@ -24,7 +24,7 @@ class CLIPSeg(nn.Module):
         self.clipseg_model = CLIPSegForImageSegmentation.from_pretrained(
             "CIDAS/clipseg-rd64-refined"
         )
-        self.device = "cuda" 
+        self.device = "cuda" if torch.cuda.is_available() else "cpu"
         self.ignore_label = MetadataCatalog.get(test_dataset).ignore_label
         
         for name, params in self.clipseg_model.named_parameters():
@@ -65,21 +65,24 @@ class CLIPSeg(nn.Module):
         else:
             text=  test_text
         input.update(text)
+        input.update({'output_hidden_states': torch.tensor(True), 'output_attentions': torch.tensor(True)})
         input = input.to(device)
         outputs = model(**input)
-        logits = outputs.logits
-        return logits
+        # logits = outputs.logits
+        # return logits
+        return outputs
     
     def inference(self, batched_inputs):
         image = Image.open(batched_inputs[0]["file_name"])
         image = image.convert("RGB")
         with torch.no_grad():
-            logits = self.clipseg_segmentation(
+            outputs = self.clipseg_segmentation(
                 self.clipseg_model,
                 [image],
                 self.clipseg_processor.tokenizer([part.replace('\'s', '') for part in self.test_class_texts], return_tensors="pt", padding="max_length"),
                 self.device,
             )
+            logits = outputs.logits
             upscaled_logits = nn.functional.interpolate(
                             logits[:,:-1,:,:],
                             size=(image.size[1], image.size[0]),
@@ -97,7 +100,7 @@ class CLIPSeg(nn.Module):
         no_part_ids = [i for i in range(len(self.test_class_texts)) if i not in part_inds]  
         preds = clipseg_preds.squeeze(0)
         preds[no_part_ids] = 0.0
-        results = [{"sem_seg": preds}]
+        results = [{"sem_seg": preds, "outputs": outputs}]
         return results
     
     def forward(self, batched_inputs):
@@ -107,6 +110,7 @@ class CLIPSeg(nn.Module):
         images = [x["image"].to(self.device) for x in batched_inputs]
         gts = [x["obj_part_sem_seg"].to(self.device) for x in batched_inputs]
         outputs = self.clipseg_segmentation(self.clipseg_model, images, None, self.device) #[b,n,h,w]
+        outputs = outputs.logits
         targets = torch.stack([nn.functional.interpolate(
                 gt.unsqueeze(0).unsqueeze(0).float(),
                 size=(outputs.shape[-2], outputs.shape[-1]),
@@ -116,7 +120,7 @@ class CLIPSeg(nn.Module):
         mask = targets != self.ignore_label #[b,h,w]
         outputs = outputs.permute(0,2,3,1) #[b,h,w,n]
         _targets = torch.zeros(outputs.shape, device=self.device)
-        class_weight = torch.ones(num_classes).cuda()
+        class_weight = torch.ones(num_classes).to(self.device)
         _targets[:,:,:,-1] = 1
         class_weight[-1] = 0.05
         _onehot = F.one_hot(targets[mask], num_classes=num_classes).float()
